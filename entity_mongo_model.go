@@ -30,6 +30,10 @@ type EntityMongoModel[T any] interface {
 	// Docs is kept as interface{} to support Union Type models i.e. accept both []bson.D (generated using GetDocToInsert()) and []struct objects.
 	InsertMany(ctx context.Context, docs interface{}, opts ...*options.InsertManyOptions) ([]T, error)
 
+	// UpsertOne inserts a single document into the collection or modifies an existing one.
+	// Model is kept as interface{} to support Union Type models i.e. accept both bson.D (generated using GetDocToInsert()) and struct object.
+	UpsertOne(ctx context.Context, model interface{}, opts ...*options.InsertOneOptions) (T, error)
+
 	// UpdateMany updates multiple filtered documents in the collection based on the provided update query.
 	UpdateMany(ctx context.Context, filter, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 
@@ -81,6 +85,12 @@ func NewEntityMongoModel[T any](modelType T, opts entityMongoModelOptions) (Enti
 	}
 
 	coll := dbConn.Collection(opts.connOpts.coll)
+
+	//Ensure the model has an `_id` field; ie a struct variable with the tag `"bson:_id"`
+	//This is critical for later operations
+	if !hasIDTag(modelType) {
+		panic("NewEntityMongoModel: `modelType` must have an ID field annotated with `bson:_id`")
+	}
 
 	modelName := schema.GetSchemaNameForModel(modelType)
 	schemaCacheKey := GetSchemaCacheKey(coll.Name(), modelName)
@@ -148,6 +158,7 @@ func (m entityMongoModel[T]) InsertOne(ctx context.Context, doc interface{},
 	}
 
 	// TODO: add an extra strict check to ensure that the doc to be inserted contains _id field
+	// May have already been addressed; see the creation method
 
 	_, err = m.coll.InsertOne(ctx, bsonDoc, opts...)
 	if err != nil {
@@ -157,6 +168,41 @@ func (m entityMongoModel[T]) InsertOne(ctx context.Context, doc interface{},
 	model, err = m.getEntityModelFromMongoDoc(ctx, bsonDoc)
 
 	return model, err
+}
+
+func (m entityMongoModel[T]) UpsertOne(ctx context.Context, doc interface{},
+	opts ...*options.InsertOneOptions,
+) (T, error) {
+
+	//Marshal the source document to BSON bytes
+	marshalledDoc, err := bson.Marshal(doc)
+	if err != nil {
+		return m.modelType, err
+	}
+
+	//Unmarhsal the BSON bytes to a BSON document
+	var bsonDoc bson.D
+	err = bson.Unmarshal(marshalledDoc, &bsonDoc)
+	if err != nil {
+		return m.modelType, err
+	}
+
+	//Get the ID of the document; this will likely not be null since the creation function has a constraint preventing this
+	id := getValForField(bsonDoc, "_id")
+
+	//Exclude the immutable `_id` field
+	for i, v := range bsonDoc {
+		if v.Key == "_id" {
+			bsonDoc = append(bsonDoc[:i], bsonDoc[i+1:]...)
+			break
+		}
+	}
+
+	//Send the trimmed document to `m.FindOneAndUpdate` for further processing
+	return m.FindOneAndUpdate(ctx, bson.M{"_id": id.Val},
+		bson.D{{Key: "$set", Value: bsonDoc}},
+		options.FindOneAndUpdate().SetUpsert(true),
+	)
 }
 
 func (m entityMongoModel[T]) InsertMany(ctx context.Context, docs interface{},

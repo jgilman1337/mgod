@@ -1,8 +1,9 @@
 module github.com/Lyearn/mgod
 
-go 1.18
+go 1.21
 
 require (
+	github.com/LukaGiorgadze/gonull v1.2.0
 	github.com/samber/lo v1.38.1
 	github.com/stretchr/testify v1.8.4
 	go.mongodb.org/mongo-driver v1.12.1

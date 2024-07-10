@@ -3,8 +3,10 @@ package mgod
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
+	"github.com/LukaGiorgadze/gonull"
 	"github.com/Lyearn/mgod/bsondoc"
 	"github.com/Lyearn/mgod/errors"
 	"github.com/Lyearn/mgod/schema"
@@ -173,4 +175,28 @@ func (m entityMongoModel[T]) transformToBulkWriteBSONDocs(ctx context.Context, b
 		}
 	}
 	return nil
+}
+
+func getValForField(doc primitive.D, key string) gonull.Nullable[interface{}] {
+	//Create a variable to hold the result
+	var res gonull.Nullable[interface{}]
+
+	//Loop over all fields of the BSON document
+	for _, e := range doc {
+		if e.Key == key {
+			res = gonull.NewNullable(e.Value)
+		}
+	}
+	return res
+}
+
+func hasIDTag[T any](itm T) bool {
+	t := reflect.TypeOf(itm)
+	for i := 0; i < t.NumField(); i++ {
+		bsonTag := t.Field(i).Tag.Get("bson")
+		if bsonTag == "_id" {
+			return true
+		}
+	}
+	return false
 }
