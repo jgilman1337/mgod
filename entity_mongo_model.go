@@ -75,6 +75,8 @@ type entityMongoModel[T any] struct {
 
 	isUnionType      bool
 	discriminatorKey string
+
+	modelHasId bool
 }
 
 // NewEntityMongoModel returns a new instance of EntityMongoModel for the provided model type and options.
@@ -88,9 +90,12 @@ func NewEntityMongoModel[T any](modelType T, opts entityMongoModelOptions) (Enti
 
 	//Ensure the model has an `_id` field; ie a struct variable with the tag `"bson:_id"`
 	//This is critical for later operations
-	if !hasIDTag(modelType) {
-		panic("NewEntityMongoModel: `modelType` must have an ID field annotated with `bson:_id`")
-	}
+	//TODO: Maybe have this occur silently and allow functions that need it to check for support instead
+	/*
+		if !hasIDTag(modelType) {
+			panic("NewEntityMongoModel: `modelType` must have an ID field annotated with `bson:_id`")
+		}
+	*/
 
 	modelName := schema.GetSchemaNameForModel(modelType)
 	schemaCacheKey := GetSchemaCacheKey(coll.Name(), modelName)
@@ -127,6 +132,7 @@ func NewEntityMongoModel[T any](modelType T, opts entityMongoModelOptions) (Enti
 		schema:           entityModelSchema,
 		isUnionType:      isUnionTypeModel,
 		discriminatorKey: discriminatorKey,
+		modelHasId:       hasIDTag(modelType),
 	}, nil
 }
 
@@ -173,6 +179,10 @@ func (m entityMongoModel[T]) InsertOne(ctx context.Context, doc interface{},
 func (m entityMongoModel[T]) UpsertOne(ctx context.Context, doc interface{},
 	opts ...*options.InsertOneOptions,
 ) (T, error) {
+	//Ensure the model has an ID field
+	if !m.modelHasId {
+		panic("Model has no `_id` field; cannot use `m.UpsertOne()`")
+	}
 
 	//Marshal the source document to BSON bytes
 	marshalledDoc, err := bson.Marshal(doc)
